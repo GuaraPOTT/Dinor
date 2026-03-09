@@ -36,6 +36,7 @@
       border: 1px solid #2a1d1a;
       box-shadow: 0 0 60px #000 inset, 0 0 40px rgba(255,120,20,0.1);
       background: #090606;
+      touch-action: manipulation; /* melhora toques no mobile */
     }
 
     /* Mensagem de loading/erro */
@@ -99,15 +100,15 @@
   const assets = {
     images: {
       bg1: 'Imagens/fundo5.png', // montanhas/longe
-      bg2: 'Imagens/fundo.png', // rochas médias
-      bg3: 'Imagens/dino.png', // silhuetas/arbustos
-      logo: 'assets/logo.png'      // opcional
+      bg2: 'Imagens/fundo.png',  // rochas médias
+      bg3: 'Imagens/dino.png',   // silhuetas/arbustos
+      logo: 'assets/logo.png'    // opcional
     },
     sounds: {
       nav:  'sons/botão.mp3',
       ok:   'sons/botão.mp3',
       back: 'sons/botão.mp3',
-      music: 'sons/musica.mp3',
+      music: 'sons/musica.mp3'
     }
   };
 
@@ -217,7 +218,7 @@
 
       drawTextOutline(state.menu.items[i], W/2, y, size, fill, outline, 10, 'center');
 
-      // cursor tipo “>” esquerdo
+      // cursor tipo “>” esquerdo (mantido do seu código)
       if (isSel) {
         ctx.save();
         ctx.fillStyle = fill;
@@ -242,7 +243,7 @@
   }
 
   // ===============================
-  // Input
+  // Input (Teclado)
   // ===============================
   const KEYS = new Set();
   window.addEventListener('keydown', (e) => {
@@ -252,12 +253,11 @@
   window.addEventListener('keyup', (e) => KEYS.delete(e.key.toLowerCase()));
 
   function handleKey(e) {
-    
-if (state.sfx.music && !state.sfx.musicStarted) {
-  state.sfx.musicStarted = true;
-  try { state.sfx.music.play(); } catch (err) { /* silencioso */ }
-}
-
+    // inicia a música no primeiro input do usuário (evita bloqueio de autoplay)
+    if (state.sfx.music && !state.sfx.musicStarted) {
+      state.sfx.musicStarted = true;
+      try { state.sfx.music.play(); } catch (err) { /* silencioso */ }
+    }
 
     if (state.entering) return;
     const k = e.key.toLowerCase();
@@ -287,6 +287,69 @@ if (state.sfx.music && !state.sfx.musicStarted) {
     }
   }
 
+  // ===============================
+  // Toque/Ponteiro (Mobile + Desktop)
+  // ===============================
+
+  // Função robusta: detecta qual item do menu foi tocado/clicado
+  function detectarCliqueNoMenu(x, y) {
+    const baseY = H * 0.56;
+    const line = Math.floor(H * 0.075);
+    const baseSize = Math.floor(H * 0.07);
+
+    for (let i = 0; i < state.menu.items.length; i++) {
+      const itemY = baseY + i * line;
+
+      // mesmo font-size base usado (sem pulse)
+      const size = baseSize;
+      ctx.save();
+      ctx.font = `900 ${size}px PixelDINOR, Impact, sans-serif`;
+
+      const label = state.menu.items[i];
+      const textWidth = ctx.measureText(label).width;
+
+      const marginX = 60; // margem lateral para facilitar o toque
+      const left   = W/2 - textWidth/2 - marginX;
+      const right  = W/2 + textWidth/2 + marginX;
+
+      const halfHeight = size * 0.6; // hitbox vertical “confortável”
+      const top    = itemY - halfHeight;
+      const bottom = itemY + halfHeight;
+      ctx.restore();
+
+      if (x >= left && x <= right && y >= top && y <= bottom) {
+        state.menu.idx = i; // seleciona o item tocado
+        selectItem(i);      // ativa imediatamente
+        return;
+      }
+    }
+  }
+
+  // Listener de toque/clique no canvas com conversão CSS->Canvas e preventDefault
+  canvas.addEventListener("pointerdown", (e) => {
+    e.preventDefault(); // evita scroll/zoom e ghost click no mobile
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width  / rect.width;   // 1280 / largura visual
+    const scaleY = canvas.height / rect.height;  // 720  / altura visual
+
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top)  * scaleY;
+
+    detectarCliqueNoMenu(x, y);
+  }, { passive: false });
+
+  // também libera música ao primeiro toque (autoplay mobile)
+  window.addEventListener('pointerdown', () => {
+    if (state.sfx.music && !state.sfx.musicStarted) {
+      state.sfx.musicStarted = true;
+      try { state.sfx.music.play(); } catch {}
+    }
+  }, { once: true });
+
+  // ===============================
+  // Seleção de item (com fade)
+  // ===============================
   function selectItem(idx) {
     try { state.sfx.ok.currentTime = 0; state.sfx.ok.play(); } catch {}
     state.entering = true;
@@ -304,10 +367,9 @@ if (state.sfx.music && !state.sfx.musicStarted) {
       if (t < 1) {
         requestAnimationFrame(fadeStep);
       } else {
-        // Aqui você pluga sua troca de cena
+        // troca de cena (mantido do seu código)
         const selected = state.menu.items[idx];
         if (selected === 'NEW GAME') {
-          // Inicie seu jogo real aqui
           window.location.href = "dino.html";
         } else if (selected === 'OPTIONS') {
           alert('Abrir Opções… (plugar tela de opções)');
