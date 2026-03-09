@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        body { background: #000; margin: 0; overflow: hidden; touch-action: none; font-family: 'Courier New', Courier, monospace; }
+        canvas { display: block; image-rendering: pixelated; width: 100vw; height: 100vh; object-fit: contain; }
+    </style>
+</head>
+<body>
+    <canvas id="game" width="640" height="480"></canvas>
+<script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    // --- CONFIGURAÇÃO DE IMAGENS ---
+    const imgWall = new Image(); imgWall.src = 'Imagens/muro.jpg';
+    const imgMedkit = new Image(); imgMedkit.src = 'Imagens/cura.png';
+    const imgWeapon = new Image(); imgWeapon.src = 'Imagens/gun.png';
+    const imgShield = new Image(); imgShield.src = 'Imagens/escudo.png';
+    
+    const imgRaptor = new Image(); imgRaptor.src = 'Imagens/raptor.png'; 
+    const imgDino = new Image(); imgDino.src = 'Imagens/dino.png';
+    const imgTank = new Image(); imgTank.src = 'Imagens/triceratops.png'; 
+
+    const ENEMY_TYPES = [
+        { name: "Raptor", img: imgRaptor, hp: 1, speed: 0.07, scale: 0.7, damage: 10 },
+        { name: "Comum", img: imgDino, hp: 3, speed: 0.04, scale: 1.0, damage: 20 },
+        { name: "Tank", img: imgTank, hp: 10, speed: 0.02, scale: 1.5, damage: 40 }
+    ];
+
+    const worldMap = [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,1,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,1,1,1,0,0,1],
+        [1,0,0,1,1,1,0,0,0,1,0,0,0,0,1,0,0,0,1,0,0,0,0,1],
+        [1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1],
+        [1,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,1],
+        [1,0,0,0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,1],
+        [1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,1],
+        [1,0,0,1,1,1,0,0,0,1,0,0,0,0,1,0,0,0,1,1,1,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,1,0,0,1,1,1,1,1,1,0,0,1,0,0,0,0,0,1],
+        [1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1],
+        [1,0,0,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,0,0,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+
+    // --- ESTADO DO JOGO ---
+    let zBuffer = new Array(640).fill(0);
+    // Adicionado shieldTimer ao player
+    let player = { x: 2, y: 2, dir: 0, hp: 100, maxHp: 100, shieldTimer: 0, isShooting: false, shootTimer: 0, lastDamageTime: 0 };
+    let enemies = [], items = [];
+    let wave = 0, waveMsgTimer = 0, gameOver = false;
+    let shakeDuration = 0, damageAlpha = 0;
+
+    function spawnWave() {
+        wave++; waveMsgTimer = 120;
+        items = [];
+        let numItems = 2 + Math.floor(wave / 4);
+        for(let i=0; i < numItems; i++) {
+            let rx, ry;
+            do { rx = Math.floor(Math.random() * 22) + 1; ry = Math.floor(Math.random() * 22) + 1; } while(worldMap[ry][rx] !== 0);
+            
+            // 50% de chance de ser escudo, com garantia de pelo menos 1 por wave
+            let isShield = (i === 0) || (Math.random() < 0.5);
+            items.push({ 
+                x: rx + 0.5, y: ry + 0.5, alive: true, 
+                type: isShield ? 'shield' : 'heal', 
+                img: isShield ? imgShield : imgMedkit 
+            });
+        }
+
+        enemies = [];
+        let count = 2 + Math.floor(wave / 1.5);
+        for(let i=0; i < count; i++) {
+            let rx, ry;
+            do { rx = Math.floor(Math.random() * 22) + 1; ry = Math.floor(Math.random() * 22) + 1; 
+            } while(worldMap[ry][rx] !== 0 || Math.sqrt((rx-player.x)**2 + (ry-player.y)**2) < 6);
+            let type = ENEMY_TYPES[Math.floor(Math.random() * ENEMY_TYPES.length)];
+            enemies.push({ x: rx + 0.5, y: ry + 0.5, alive: true, img: type.img, health: type.hp + Math.floor(wave/4), speed: type.speed + (wave * 0.003), scale: type.scale, damage: type.damage, dist: 0 });
+        }
+    }
+    spawnWave();
+
+    // --- CONTROLES ---
+    const keys = {};
+    let isMobile = false, joystick = { active: false, startX: 0, startY: 0, currX: 0, currY: 0 }, lastTouchX = 0;
+    canvas.addEventListener('mousedown', () => { if (!gameOver) { if (document.pointerLockElement !== canvas && !isMobile) canvas.requestPointerLock(); else fire(); } else location.reload(); });
+    document.addEventListener('mousemove', (e) => { if (document.pointerLockElement === canvas && !gameOver) player.dir += e.movementX * 0.0025; });
+    window.onkeydown = (e) => keys[e.key.toLowerCase()] = true;
+    window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+
+    // Mobile touches
+    canvas.addEventListener('touchstart', (e) => {
+        isMobile = true;
+        for (let t of e.changedTouches) {
+            if (t.clientX < window.innerWidth / 2) { joystick.active = true; joystick.startX = t.clientX; joystick.startY = t.clientY; joystick.currX = t.clientX; joystick.currY = t.clientY; }
+            else { lastTouchX = t.clientX; if (t.clientX > window.innerWidth - 120 && t.clientY > window.innerHeight - 120) fire(); }
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchmove', (e) => {
+        for (let t of e.touches) {
+            if (joystick.active && t.clientX < window.innerWidth / 2) { joystick.currX = t.clientX; joystick.currY = t.clientY; }
+            else { player.dir += (t.clientX - lastTouchX) * 0.007; lastTouchX = t.clientX; }
+        }
+        e.preventDefault();
+    }, { passive: false });
+    canvas.addEventListener('touchend', (e) => { for (let t of e.changedTouches) if (t.clientX < window.innerWidth / 2) joystick.active = false; });
+
+    function fire() { if (!player.isShooting && !gameOver) { player.isShooting = true; player.shootTimer = 6; shakeDuration = 10; checkHit(); } }
+    function checkHit() {
+        enemies.forEach(en => {
+            if (!en.alive) return;
+            let ang = Math.atan2(en.y-player.y, en.x-player.x) - player.dir;
+            while(ang < -Math.PI) ang += Math.PI*2; while(ang > Math.PI) ang -= Math.PI*2;
+            if(Math.abs(ang) < 0.22 && en.dist < 10) { en.health--; if(en.health <= 0) en.alive = false; }
+        });
+    }
+
+    function update() {
+        if (gameOver) return;
+        
+        // Diminuir timer do escudo
+        if (player.shieldTimer > 0) player.shieldTimer--;
+
+        let stepX = 0, stepY = 0; let pSpeed = 0.09;
+        if (keys['w']) { stepX += Math.cos(player.dir) * pSpeed; stepY += Math.sin(player.dir) * pSpeed; }
+        if (keys['s']) { stepX -= Math.cos(player.dir) * pSpeed; stepY -= Math.sin(player.dir) * pSpeed; }
+        if (keys['a']) { stepX += Math.cos(player.dir - Math.PI/2) * 0.07; stepY += Math.sin(player.dir - Math.PI/2) * 0.07; }
+        if (keys['d']) { stepX += Math.cos(player.dir + Math.PI/2) * 0.07; stepY += Math.sin(player.dir + Math.PI/2) * 0.07; }
+
+        if (joystick.active) {
+            let dx = joystick.currX - joystick.startX, dy = joystick.currY - joystick.startY;
+            let dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+            let angle = Math.atan2(dy, dx);
+            stepX += Math.cos(player.dir + angle) * (dist/40) * pSpeed;
+            stepY += Math.sin(player.dir + angle) * (dist/40) * pSpeed;
+        }
+
+        if (worldMap[Math.floor(player.y)][Math.floor(player.x + stepX + (stepX>0?0.2:-0.2))] === 0) player.x += stepX;
+        if (worldMap[Math.floor(player.y + stepY + (stepY>0?0.2:-0.2))][Math.floor(player.x)] === 0) player.y += stepY;
+
+        let aliveCount = 0;
+        enemies.forEach(en => {
+            if (en.alive) {
+                aliveCount++;
+                let edx = player.x - en.x, edy = player.y - en.y;
+                en.dist = Math.sqrt(edx*edx + edy*edy);
+                if (en.dist > 0.7) {
+                    let ang = Math.atan2(edy, edx);
+                    let vx = Math.cos(ang) * en.speed, vy = Math.sin(ang) * en.speed;
+                    if (worldMap[Math.floor(en.y)][Math.floor(en.x + (vx>0?0.2:-0.2))] === 0) en.x += vx;
+                    if (worldMap[Math.floor(en.y + (vy>0?0.2:-0.2))][Math.floor(en.x)] === 0) en.y += vy;
+                } else if (Date.now() - player.lastDamageTime > 800) {
+                    // Lógica de proteção do escudo
+                    if (player.shieldTimer <= 0) {
+                        player.hp -= en.damage; damageAlpha = 0.5;
+                        if (player.hp <= 0) { player.hp = 0; gameOver = true; }
+                    } else {
+                        shakeDuration = 5;
+                    }
+                    player.lastDamageTime = Date.now();
+                }
+            }
+        });
+
+        if(aliveCount === 0 && !gameOver) spawnWave();
+
+        // Coleta de itens diferenciada
+        items.forEach(it => { 
+            if (it.alive && Math.sqrt((player.x - it.x)**2 + (player.y - it.y)**2) < 0.6) { 
+                it.alive = false; 
+                if (it.type === 'shield') player.shieldTimer = 400; // ~6 segundos
+                else player.hp = Math.min(player.maxHp, player.hp + 35); 
+            } 
+        });
+
+        if (shakeDuration > 0) shakeDuration--;
+        if (damageAlpha > 0) damageAlpha -= 0.02;
+        if (waveMsgTimer > 0) waveMsgTimer--;
+    }
+
+    function draw() {
+        update();
+        ctx.save();
+        if (shakeDuration > 0) ctx.translate((Math.random()-0.5)*shakeDuration, (Math.random()-0.5)*shakeDuration);
+        
+        ctx.fillStyle = "#050505"; ctx.fillRect(0,0,640,240); 
+        ctx.fillStyle = "#151515"; ctx.fillRect(0,240,640,240); 
+        
+        const FOV = Math.PI/3;
+        for(let i=0; i<640; i++) {
+            let ang = (player.dir - FOV/2) + (i/640)*FOV;
+            let d=0, hit=false, ex = Math.cos(ang), ey = Math.sin(ang);
+            while(!hit && d < 25) { d += 0.05; if(worldMap[Math.floor(player.y + ey*d)][Math.floor(player.x + ex*d)] == 1) hit = true; }
+            let dist = d * Math.cos(ang - player.dir);
+            zBuffer[i] = dist;
+            let h = 480/dist;
+            if(imgWall.complete) ctx.drawImage(imgWall, Math.floor(((player.x+ex*d)%1 + (player.y+ey*d)%1)*imgWall.width)%imgWall.width, 0, 1, imgWall.height, i, 240-h/2, 1, h);
+            ctx.fillStyle = `rgba(0,0,0,${Math.min(1, dist/15)})`; ctx.fillRect(i, 240-h/2, 1, h);
+        }
+
+        enemies.sort((a,b) => b.dist - a.dist).forEach(en => { if (en.alive) drawSprite(en.x, en.y, en.img, en.scale, false); });
+        // Corrigido: Desenha o item com sua própria imagem
+        items.forEach(it => { if(it.alive) drawSprite(it.x, it.y, it.img, 0.5, true); });
+        
+        ctx.restore();
+
+        // Overlay do escudo
+        if (player.shieldTimer > 0) {
+            ctx.fillStyle = `rgba(0, 200, 255, ${Math.min(0.15, player.shieldTimer/100)})`;
+            ctx.fillRect(0,0,640,480);
+        }
+
+        if (damageAlpha > 0) { ctx.fillStyle = `rgba(255, 0, 0, ${damageAlpha})`; ctx.fillRect(0, 0, 640, 480); }
+        drawHUD();
+        requestAnimationFrame(draw);
+    }
+
+    function drawSprite(x, y, img, scale, isItem) {
+        if(!img.complete) return;
+        let dx = x - player.x, dy = y - player.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        let ang = Math.atan2(dy, dx) - player.dir;
+        while(ang < -Math.PI) ang += Math.PI*2; while(ang > Math.PI) ang -= Math.PI*2;
+        if(dist > 0.3 && Math.abs(ang) < Math.PI/3) {
+            let s = (480/dist)*scale;
+            let xOff = (ang * 640 / (Math.PI/3)) + 320 - s/2;
+            let yOff = isItem ? (240 + (180/dist) - s) : (240 - s/2);
+            for(let i=0; i<s; i++) {
+                let sx = Math.floor(xOff+i);
+                if(sx >= 0 && sx < 640 && zBuffer[sx] > dist) ctx.drawImage(img, Math.floor((i/s)*img.width), 0, 1, img.height, sx, yOff, 1, s);
+            }
+        }
+    }
+
+    function drawHUD() {
+        ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.strokeRect(318,238,4,4);
+        
+        if(imgWeapon.complete) {
+            let bob = Math.sin(Date.now()*0.005)*6;
+            let rec = player.isShooting ? 40 : 0;
+            // Muzzle Flash original mantido
+            if (player.isShooting && player.shootTimer > 2) {
+                ctx.save();
+                ctx.translate(320, 380 + bob);
+                ctx.fillStyle = "rgba(255, 200, 50, 0.15)"; ctx.fillRect(-320, -380, 640, 480);
+                ctx.globalCompositeOperation = "lighter";
+                let g = ctx.createRadialGradient(0, 0, 0, 0, 0, 60);
+                g.addColorStop(0, "white"); g.addColorStop(0.2, "yellow"); g.addColorStop(1, "transparent");
+                ctx.fillStyle = g;
+                for(let i=0; i<6; i++) { ctx.rotate(Math.PI/3); ctx.beginPath(); ctx.ellipse(0,0, 20, 50, 0,0, Math.PI*2); ctx.fill(); }
+                ctx.restore();
+            }
+            ctx.drawImage(imgWeapon, 320-130, 480-240+bob+rec, 260, 260);
+        }
+
+        // HUD Texto e Barras
+        ctx.textAlign = "left"; ctx.fillStyle = "white"; ctx.font = "16px 'Courier New'";
+        ctx.fillText(`WAVE: ${wave}`, 20, 55);
+        ctx.fillStyle = "#333"; ctx.fillRect(20, 20, 200, 15);
+        ctx.fillStyle = player.hp > 30 ? "#0f0" : "#f00";
+        ctx.fillRect(20, 20, (player.hp/player.maxHp)*200, 15);
+
+        // Barra de Escudo
+        if (player.shieldTimer > 0) {
+            ctx.fillStyle = "cyan";
+            ctx.fillRect(20, 65, (player.shieldTimer/400)*200, 8);
+            ctx.fillText("SHIELD", 225, 75);
+        }
+
+        if (waveMsgTimer > 0) {
+            ctx.fillStyle = "white"; ctx.font = "bold 50px 'Courier New'"; ctx.textAlign = "center";
+            ctx.fillText(`HORDA ${wave}`, 320, 180);
+        }
+
+        if(player.isShooting) { player.shootTimer--; if(player.shootTimer <= 0) player.isShooting = false; }
+        if(gameOver) {
+            ctx.fillStyle = "rgba(100,0,0,0.8)"; ctx.fillRect(0,0,640,480);
+            ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 40px Courier New";
+            ctx.fillText("VOCÊ MORREU", 320, 240);
+        }
+    }
+    draw();
+</script>
+</body>
+</html>
