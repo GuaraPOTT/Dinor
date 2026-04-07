@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DinoR</title>
+    <style>
+        body { background: #000; margin: 0; overflow: hidden; touch-action: none; font-family: 'Courier New', Courier, monospace; }
+        canvas { display: block; image-rendering: pixelated; width: 100vw; height: 100vh; object-fit: contain; }
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center;
+            align-items: center; text-align: center; z-index: 10;
+        }
+        #start-screen { background: rgba(0,0,0,0.9); color: #e6b35a; cursor: pointer; }
+        #start-screen h1 { font-size: 60px; margin: 0; color: #ff7a1a; text-shadow: 4px 4px #000; }
+        #death-screen { background: rgba(60, 0, 0, 0.9); color: white; display: none; }
+        #death-screen h1 { font-size: 50px; color: #ffffff; margin-bottom: 10px; }
+        .btn-container { display: flex; gap: 20px; margin-top: 20px; }
+        .btn {
+            padding: 15px 30px; font-family: 'Courier New'; font-weight: bold;
+            font-size: 20px; border: none; cursor: pointer; color: white;
+            transition: transform 0.1s; text-decoration: none;
+        }
+        .btn-restart { background: #1a1; }
+        .btn-menu { background: #555; }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen" class="overlay" onclick="startGame()">
+        <h1>DINOR</h1>
+        <p>CLIQUE PARA INICIAR SOBREVIVÊNCIA</p>
+        <small style="color: #888;">A ERA DOS DINOSSAUROS RETORNOU!</small>
+    </div>
+
+    <div id="death-screen" class="overlay">
+        <h1>VOCÊ FOI EXTINTO!</h1>
+        <p id="final-stats" style="font-size: 24px;">ONDAS SOBREVIVIDAS: 0</p>
+        <div class="btn-container">
+            <button class="btn btn-restart" onclick="location.reload()">RECOMEÇAR</button>
+            <a href="index.html" class="btn btn-menu">VOLTAR AO MENU</a>
+        </div>
+    </div>
+
+    <canvas id="game" width="640" height="480"></canvas>
+
+<script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    // --- ASSETS ---
+    const sndBgm = new Audio('sons/musica_fundo.mp3'); sndBgm.loop = true; sndBgm.volume = 0.4;
+    const sndShoot = new Audio('sons/tiro.mp3');
+    const sndStep = new Audio('sons/passo.mp3'); 
+    const sndItem = new Audio('sons/item.mp3');
+    const sndShield = new Audio('sons/escudo.mp3');
+    const sndRoar = new Audio('sons/rugid.mp3');
+    const sndHurt = new Audio('sons/dano.mp3');
+    const sndGameOver = new Audio('sons/morte.mp3');
+    const sndDinoStep = new Audio('sons/passo_dino.mp3');
+    const sndDinoHit = new Audio('sons/dino_hit.mp3');
+
+    const imgWall = new Image(); imgWall.src = 'Imagens/muro.jpg';
+    const imgMedkit = new Image(); imgMedkit.src = 'Imagens/cura.png';
+    const imgWeapon = new Image(); imgWeapon.src = 'Imagens/gun.png';
+    const imgShield = new Image(); imgShield.src = 'Imagens/escudo.png';
+    const imgAmmo = new Image(); imgAmmo.src = 'Imagens/bala.png';
+    const imgRaptor = new Image(); imgRaptor.src = 'Imagens/raptor.png'; 
+    const imgDino = new Image(); imgDino.src = 'Imagens/dino.png';
+    const imgTank = new Image(); imgTank.src = 'Imagens/triceratops.png'; 
+
+    let gameActive = false, gameOver = false;
+    let dinoStepCounter = 0;
+    let zBuffer = new Array(640).fill(0);
+    
+    let player = { 
+        x: 2.5, y: 2.5, dir: 0, hp: 100, maxHp: 100, 
+        ammo: 15, maxAmmo: 30,
+        shieldTimer: 0, isShooting: false, shootTimer: 0, 
+        lastDamageTime: 0, stepSndCounter: 0 
+    };
+
+    let enemies = [], items = [], wave = 0, waveMsgTimer = 0, shakeDuration = 0, damageAlpha = 0;
+
+    const ENEMY_TYPES = [
+        { name: "Raptor", img: imgRaptor, hp: 1, speed: 0.09, scale: 0.5, damage: 10 },
+        { name: "Comum", img: imgDino, hp: 3, speed: 0.06, scale: 1.0, damage: 20 },
+        { name: "Tank", img: imgTank, hp: 8, speed: 0.03, scale: 1.5, damage: 40 }
+    ];
+
+    const worldMap = [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,1,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,1,1,1,0,0,1],
+        [1,0,0,1,1,1,0,0,0,1,0,0,0,0,1,0,0,0,1,0,0,0,0,1],
+        [1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1],
+        [1,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,1],
+        [1,0,0,0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0,0,0,0,1],
+        [1,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,1],
+        [1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,1],
+        [1,0,0,1,1,1,0,0,0,1,0,0,0,0,1,0,0,0,1,1,1,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,1,0,0,1,1,1,1,1,1,0,0,1,0,0,0,0,0,1],
+        [1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1],
+        [1,0,0,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,0,0,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+
+    function startGame() {
+        document.getElementById('start-screen').style.display = 'none';
+        if (!isMobile) canvas.requestPointerLock();
+        gameActive = true;
+        sndBgm.play().catch(() => {});
+    }
+
+    function spawnWave() {
+        wave++; waveMsgTimer = 150;
+        items = [];
+        
+        // --- Spawn de Itens (Proporção Exata) ---
+        let baseItems = 3;
+        for(let i=0; i<baseItems; i++) {
+            let rx, ry;
+            do { rx = Math.floor(Math.random() * 22) + 1; ry = Math.floor(Math.random() * 22) + 1; } while(worldMap[ry][rx] !== 0);
+            let type = (i % 3 === 0) ? 'shield' : 'heal';
+            items.push({ x: rx + 0.5, y: ry + 0.5, alive: true, type: type, img: (type === 'shield' ? imgShield : imgMedkit) });
+        }
+        // Munição
+        for(let i=0; i<2; i++) {
+            let rx, ry;
+            do { rx = Math.floor(Math.random() * 22) + 1; ry = Math.floor(Math.random() * 22) + 1; } while(worldMap[ry][rx] !== 0);
+            items.push({ x: rx + 0.5, y: ry + 0.5, alive: true, type: 'ammo', img: imgAmmo });
+        }
+
+        // --- Spawn de Inimigos (Margem de Segurança Reforçada) ---
+        enemies = [];
+        let count = 2 + Math.floor(wave * 1.1);
+        for(let i=0; i < count; i++) {
+            let rx, ry, isSafe = false;
+            let m = 0.4; // Margem para não nascer colado
+            while(!isSafe) {
+                rx = Math.random() * 21 + 1.5;
+                ry = Math.random() * 21 + 1.5;
+                if (worldMap[Math.floor(ry)][Math.floor(rx)] === 0 &&
+                    worldMap[Math.floor(ry+m)][Math.floor(rx+m)] === 0 &&
+                    worldMap[Math.floor(ry-m)][Math.floor(rx-m)] === 0 &&
+                    Math.sqrt((rx-player.x)**2 + (ry-player.y)**2) > 7) { 
+                    isSafe = true;
+                }
+            }
+            let type = ENEMY_TYPES[Math.floor(Math.random() * ENEMY_TYPES.length)];
+            enemies.push({ 
+                x: rx, y: ry, alive: true, img: type.img, 
+                health: type.hp + Math.floor(wave/3), speed: type.speed + (wave * 0.001), 
+                scale: type.scale, damage: type.damage, dist: 0, hitTimer: 0 
+            });
+        }
+    }
+    spawnWave();
+
+    const keys = {};
+    let isMobile = 'ontouchstart' in window;
+
+    canvas.addEventListener('mousedown', () => { 
+        if (!gameActive || gameOver) return;
+        if (document.pointerLockElement !== canvas && !isMobile) canvas.requestPointerLock(); 
+        else fire(); 
+    });
+
+    document.addEventListener('mousemove', (e) => { if (document.pointerLockElement === canvas && !gameOver) player.dir += e.movementX * 0.0025; });
+    window.onkeydown = (e) => keys[e.key.toLowerCase()] = true;
+    window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+
+    function fire() { 
+        if (!player.isShooting && !gameOver && player.ammo > 0) { 
+            player.ammo--; player.isShooting = true; player.shootTimer = 6; shakeDuration = 8;
+            sndShoot.currentTime = 0; sndShoot.play().catch(()=>{});
+            checkHit(); 
+        } 
+    }
+
+    function checkHit() {
+        let rayX = player.x, rayY = player.y;
+        for(let i=0; i<150; i++){
+            rayX += Math.cos(player.dir)*0.15;
+            rayY += Math.sin(player.dir)*0.15;
+            if(worldMap[Math.floor(rayY)][Math.floor(rayX)] === 1) break;
+            enemies.forEach(en => {
+                if(en.alive){
+                    let d = Math.hypot(en.x-rayX, en.y-rayY);
+                    if(d < 0.45){
+                        en.health--; en.hitTimer = 5;
+                        en.x -= Math.cos(player.dir) * 0.2; en.y -= Math.sin(player.dir) * 0.2;
+                        sndDinoHit.currentTime = 0; sndDinoHit.play().catch(()=>{});
+                        if(en.health <= 0) en.alive = false;
+                    }
+                }
+            });
+        }
+    }
+
+    function update() {
+        if (!gameActive || gameOver) return;
+        if (player.shieldTimer > 0) player.shieldTimer--;
+
+        // Movimento do Player com Colisão Deslizante
+        let stepX = 0, stepY = 0, pSpeed = 0.09;
+        if (keys['w']) { stepX += Math.cos(player.dir) * pSpeed; stepY += Math.sin(player.dir) * pSpeed; }
+        if (keys['s']) { stepX -= Math.cos(player.dir) * pSpeed; stepY -= Math.sin(player.dir) * pSpeed; }
+        if (keys['a']) { stepX += Math.cos(player.dir - Math.PI/2) * 0.07; stepY += Math.sin(player.dir - Math.PI/2) * 0.07; }
+        if (keys['d']) { stepX += Math.cos(player.dir + Math.PI/2) * 0.07; stepY += Math.sin(player.dir + Math.PI/2) * 0.07; }
+
+        let pM = 0.2;
+        if (worldMap[Math.floor(player.y)][Math.floor(player.x + stepX + (stepX>0?pM:-pM))] === 0) player.x += stepX;
+        if (worldMap[Math.floor(player.y + stepY + (stepY>0?pM:-pM))][Math.floor(player.x)] === 0) player.y += stepY;
+
+        enemies.forEach(en => {
+            if (en.alive) {
+                let edx = player.x - en.x, edy = player.y - en.y;
+                en.dist = Math.sqrt(edx*edx + edy*edy);
+                
+                if (en.dist > 0.7) {
+                    let ang = Math.atan2(edy, edx);
+                    let moveX = Math.cos(ang) * en.speed;
+                    let moveY = Math.sin(ang) * en.speed;
+                    
+                    // --- COLISÃO DESLIZANTE PARA INIMIGOS ---
+                    let m = 0.3; // Padding do dinossauro
+                    
+                    // Tenta mover no X
+                    if(worldMap[Math.floor(en.y)][Math.floor(en.x + moveX + (moveX>0?m:-m))] === 0) {
+                        en.x += moveX;
+                    }
+                    // Tenta mover no Y (independente do X ter batido ou não)
+                    if(worldMap[Math.floor(en.y + moveY + (moveY>0?m:-m))][Math.floor(en.x)] === 0) {
+                        en.y += moveY;
+                    }
+
+                    // Separação entre eles
+                    enemies.forEach(other => {
+                        if(other !== en && other.alive) {
+                            let distSep = Math.hypot(en.x - other.x, en.y - other.y);
+                            if(distSep < 0.6) { en.x += (en.x - other.x) * 0.03; en.y += (en.y - other.y) * 0.03; }
+                        }
+                    });
+                } else if (Date.now() - player.lastDamageTime > 700) {
+                    if (player.shieldTimer <= 0) {
+                        player.hp -= en.damage; damageAlpha = 0.6; shakeDuration = 15;
+                        sndHurt.currentTime = 0; sndHurt.play().catch(()=>{});
+                        if (player.hp <= 0) { 
+                            gameOver = true; document.exitPointerLock(); 
+                            document.getElementById('death-screen').style.display = 'flex';
+                            document.getElementById('final-stats').innerText = `ONDAS: ${wave}`;
+                        }
+                    } 
+                    player.lastDamageTime = Date.now();
+                }
+            }
+        });
+
+        if(enemies.filter(e => e.alive).length === 0 && !gameOver) spawnWave();
+        
+        items.forEach(it => { if (it.alive && Math.hypot(player.x - it.x, player.y - it.y) < 0.7) { 
+            it.alive = false; 
+            if (it.type === 'shield') { player.shieldTimer = 500; sndShield.play().catch(()=>{}); }
+            else if (it.type === 'heal') { player.hp = Math.min(player.maxHp, player.hp + 35); sndItem.play().catch(()=>{}); }
+            else if (it.type === 'ammo') { player.ammo = Math.min(player.maxAmmo, player.ammo + 10); sndItem.play().catch(()=>{}); }
+        }});
+
+        if (shakeDuration > 0) shakeDuration--;
+        if (damageAlpha > 0) damageAlpha -= 0.02;
+        if (waveMsgTimer > 0) waveMsgTimer--;
+    }
+
+    function draw() {
+        update(); ctx.save();
+        if (shakeDuration > 0) ctx.translate((Math.random()-0.5)*shakeDuration, (Math.random()-0.5)*shakeDuration);
+        
+        // Fundo
+        let g1 = ctx.createLinearGradient(0,0,0,240); g1.addColorStop(0,"#050505"); g1.addColorStop(1,"#1a1010");
+        ctx.fillStyle = g1; ctx.fillRect(0,0,640,240);
+        let g2 = ctx.createLinearGradient(0,240,0,480); g2.addColorStop(0,"#111"); g2.addColorStop(1,"#221a10");
+        ctx.fillStyle = g2; ctx.fillRect(0,240,640,480);
+
+        const FOV = Math.PI/3;
+        for(let i=0; i<640; i++) {
+            let ang = (player.dir - FOV/2) + (i/640)*FOV;
+            let d=0, hit=false, ex = Math.cos(ang), ey = Math.sin(ang);
+            while(!hit && d < 20) { d += 0.07; if(worldMap[Math.floor(player.y + ey*d)][Math.floor(player.x + ex*d)] == 1) hit = true; }
+            let dist = d * Math.cos(ang - player.dir); zBuffer[i] = dist;
+            let h = 480/dist;
+            if(imgWall.complete) ctx.drawImage(imgWall, Math.floor(((player.x+ex*d)%1 + (player.y+ey*d)%1)*imgWall.width)%imgWall.width, 0, 1, imgWall.height, i, 240-h/2, 1, h);
+            ctx.fillStyle = `rgba(0,0,0,${Math.min(0.85, dist/10)})`; ctx.fillRect(i, 240-h/2, 1, h);
+        }
+
+        enemies.sort((a,b)=>b.dist-a.dist).forEach(en => { 
+            if (en.alive) {
+                if (en.hitTimer > 0) { ctx.filter = "brightness(4)"; en.hitTimer--; }
+                drawSprite(en.x, en.y, en.img, en.scale, false); ctx.filter = "none";
+            }
+        });
+        items.forEach(it => { if(it.alive) drawSprite(it.x, it.y, it.img, 0.4, true); });
+        ctx.restore();
+
+        if (player.shieldTimer > 0) { ctx.fillStyle = `rgba(0, 150, 255, ${Math.min(0.15, player.shieldTimer/200)})`; ctx.fillRect(0,0,640,480); }
+        if (damageAlpha > 0) { ctx.fillStyle = `rgba(255, 0, 0, ${damageAlpha})`; ctx.fillRect(0, 0, 640, 480); }
+        drawHUD(); requestAnimationFrame(draw);
+    }
+
+    function drawSprite(x, y, img, scale, isItem) {
+        if(!img.complete) return;
+        let dx = x - player.x, dy = y - player.y, dist = Math.sqrt(dx*dx + dy*dy), ang = Math.atan2(dy, dx) - player.dir;
+        while(ang < -Math.PI) ang += Math.PI*2; while(ang > Math.PI) ang -= Math.PI*2;
+        if(dist > 0.4 && Math.abs(ang) < Math.PI/3) {
+            let s = (480/dist)*scale, xOff = (ang * 640 / (Math.PI/3)) + 320 - s/2, yOff = isItem ? (240 + (180/dist) - s) : (240 - s/2);
+            for(let i=0; i<s; i++) {
+                let sx = Math.floor(xOff+i);
+                if(sx >= 0 && sx < 640 && zBuffer[sx] > dist) ctx.drawImage(img, Math.floor((i/s)*img.width), 0, 1, img.height, sx, yOff, 1, s);
+            }
+        }
+    }
+
+    function drawHUD() {
+        if (!gameActive || gameOver) return;
+        ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.strokeRect(318,238,4,4);
+        if(imgWeapon.complete) {
+            let bob = Math.sin(Date.now()*0.005)*6, rec = player.isShooting ? 35 : 0;
+            ctx.drawImage(imgWeapon, 320-130, 480-240+bob+rec, 260, 260);
+        }
+        ctx.fillStyle = "#222"; ctx.fillRect(20, 20, 200, 18);
+        ctx.fillStyle = player.hp > 30 ? "#0a0" : "#a00"; ctx.fillRect(20, 20, (player.hp/player.maxHp)*200, 18);
+        ctx.fillStyle = "white"; ctx.font = "bold 12px Arial"; ctx.fillText(`HP: ${Math.ceil(player.hp)}%`, 25, 34);
+        ctx.fillStyle = "#e6b35a"; ctx.font = "bold 14px 'Courier New'"; ctx.fillText(`ONDA: ${wave}`, 25, 56);
+        ctx.fillStyle = player.ammo < 5 ? "#f00" : "#fff"; ctx.fillText(`MUN: ${player.ammo}/${player.maxAmmo}`, 25, 76);
+        if (waveMsgTimer > 0) {
+            ctx.textAlign = "center"; ctx.fillStyle = "#ff7a1a"; ctx.font = "bold 50px 'Courier New'"; ctx.fillText(`HORDA ${wave}`, 320, 180);
+        }
+        if(player.isShooting) { player.shootTimer--; if(player.shootTimer <= 0) player.isShooting = false; }
+    }
+    draw();
+</script>
+</body>
+</html>
